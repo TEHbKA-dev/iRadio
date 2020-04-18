@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#262525</color>
+    <color name="colorPrimaryDark">#151414</color>
+    <color name="colorAccent">#ff6000</color>
+    <color name="colorWhite">#ffffff</color>
+
+    <color name="SurfaceColor">#FFCC00</color>
+    <color name="BackwardColorHeavy">#B0000000</color>
+    <color name="backward_color">#DD000000</color>
+    <color name="SplashColor">@android:color/black</color>
+    <color name="background_panel_color">#080808</color>
+    <item name="SplashBackground" type="color">#f0f0f0</item>
+
+    <color name="flatOrange">#FF9500</color>
+</resources>

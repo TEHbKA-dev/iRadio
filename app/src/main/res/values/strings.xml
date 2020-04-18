@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">iRadio</string>
+    <string name="radio_cover">Radio cover</string>
+    <string name="radio_state">Radio state</string>
+</resources>
