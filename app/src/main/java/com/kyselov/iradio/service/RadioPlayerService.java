@@ -267,6 +267,7 @@ public class RadioPlayerService extends Service implements EventCenter.EventCent
         unregisterReceiver(headsetPlugReceiver);
         super.onDestroy();
         mediaSession.release();
+        MediaController.get().cleanup();
         EventCenter.get().removeObserver(this, EventCenter.radioPlayingPlayStateChanged);
     }
 

@@ -13,6 +13,9 @@ import com.kyselov.iradio.models.RadioModel;
 import com.kyselov.iradio.service.RadioPlayerService;
 import com.un4seen.bass.BASS.DOWNLOADPROC;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -27,6 +30,7 @@ import static com.un4seen.bass.BASS.BASS_CONFIG_NET_BUFFER;
 import static com.un4seen.bass.BASS.BASS_CONFIG_NET_PLAYLIST;
 import static com.un4seen.bass.BASS.BASS_CONFIG_NET_PREBUF_WAIT;
 import static com.un4seen.bass.BASS.BASS_CONFIG_NET_READTIMEOUT;
+import static com.un4seen.bass.BASS.BASS_CONFIG_NET_TIMEOUT;
 import static com.un4seen.bass.BASS.BASS_CONFIG_UPDATETHREADS;
 import static com.un4seen.bass.BASS.BASS_ChannelGetTags;
 import static com.un4seen.bass.BASS.BASS_ChannelIsActive;
@@ -65,16 +69,17 @@ import static com.un4seen.bass.BASS.BASS_Free;
 import static com.un4seen.bass.BASS.BASS_GetConfig;
 import static com.un4seen.bass.BASS.BASS_Init;
 import static com.un4seen.bass.BASS.BASS_OK;
+import static com.un4seen.bass.BASS.BASS_PluginLoad;
 import static com.un4seen.bass.BASS.BASS_STREAM_AUTOFREE;
 import static com.un4seen.bass.BASS.BASS_STREAM_BLOCK;
-import static com.un4seen.bass.BASS.BASS_STREAM_RESTRATE;
 import static com.un4seen.bass.BASS.BASS_STREAM_STATUS;
-import static com.un4seen.bass.BASS.BASS_SYNC_DEV_FAIL;
 import static com.un4seen.bass.BASS.BASS_SYNC_END;
 import static com.un4seen.bass.BASS.BASS_SYNC_FREE;
 import static com.un4seen.bass.BASS.BASS_SYNC_META;
 import static com.un4seen.bass.BASS.BASS_SYNC_MIXTIME;
+import static com.un4seen.bass.BASS.BASS_SYNC_OGG_CHANGE;
 import static com.un4seen.bass.BASS.BASS_SYNC_STALL;
+import static com.un4seen.bass.BASS.BASS_SYNC_THREAD;
 import static com.un4seen.bass.BASS.BASS_SetConfig;
 import static com.un4seen.bass.BASS.BASS_StreamCreateURL;
 import static com.un4seen.bass.BASS.BASS_StreamFree;
@@ -82,7 +87,10 @@ import static com.un4seen.bass.BASS.BASS_StreamGetFilePosition;
 import static com.un4seen.bass.BASS.BASS_TAG_HTTP;
 import static com.un4seen.bass.BASS.BASS_TAG_ICY;
 import static com.un4seen.bass.BASS.BASS_TAG_META;
+import static com.un4seen.bass.BASS.BASS_TAG_OGG;
 import static com.un4seen.bass.BASS.SYNCPROC;
+import static com.un4seen.bass.BASSHLS.BASS_SYNC_HLS_SEGMENT;
+import static com.un4seen.bass.BASSHLS.BASS_TAG_HLS_EXTINF;
 
 public class MediaController implements AudioManager.OnAudioFocusChangeListener {
 
@@ -96,9 +104,9 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
     private volatile boolean download;
     private int countReconnected;
 
-    private static final int FLAGS_STREAM_CREATE_URL = BASS_STREAM_RESTRATE | BASS_STREAM_BLOCK | BASS_STREAM_STATUS | BASS_STREAM_AUTOFREE;
+    //private static final int FLAGS_STREAM_CREATE_URL = BASS_STREAM_RESTRATE | BASS_STREAM_BLOCK | BASS_STREAM_STATUS | BASS_STREAM_AUTOFREE;
+    private static final int FLAGS_STREAM_CREATE_URL = BASS_STREAM_BLOCK | BASS_STREAM_STATUS | BASS_STREAM_AUTOFREE;
 
-    private boolean isBassInit;
     private int hasAudioFocus;
 
     private int audioFocus = AUDIO_NO_FOCUS_NO_DUCK;
@@ -123,8 +131,14 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
                 AndroidUtilities.runOnUIThread(() -> {
                     EventCenter.get().postEventName(EventCenter.radioUpdateTitleAndArtist);
                     EventCenter.get().postEventName(EventCenter.radioPlayingPlayStateChanged);
+                    EventCenter.get().postEventName(EventCenter.itemPlayingPlayStateChanged, getPlayingRadio());
                 });
                 return;
+            }
+
+            if (isPlaying()) {
+                // get the stream title
+                DoMeta();
             }
 
             // monitor buffering progress
@@ -152,8 +166,9 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
 
         syncStateQueue = new DispatchQueue("syncStateQueue");
 
-        isBassInit = false;
         countReconnected = 1;
+
+        initializationBass(); // init bass lib
 
         mediaQueue.postRunnable(() -> {
             if (BuildVars.BUILD_FOR_TV) return;
@@ -229,7 +244,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
 
     public void cleanup() {
         if (isRestartPlaying()) return;
-        cleanupPlayer(false, true);
+        cleanupPlayer(true, true);
         BASS_Free();
         playlist.clear();
         FileLog.d("Destroy player");
@@ -238,8 +253,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
     public void cleanupPlayer(boolean notify, boolean stopService) {
 
         if (isRestartPlaying()) return;
-
-        if (streamBass != 0) BASS_StreamFree(streamBass); // close old stream
 
         if (playingRadio != null) {
             playingRadio = null;
@@ -385,40 +398,53 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
         }
     }
 
-    private boolean preparePlaying(final RadioModel radio) {
-
-        if (radio == null) {
-            return false;
-        }
-
-        if (isBassInit) BASS_Free();
+    private void initializationBass() {
 
         //BASS_DEVICE_AUDIOTRACK | BASS_DEVICE_FREQ
-        if ((isBassInit = BASS_Init(-1, 44100, 0))) {
 
-            BASS_SetConfig(BASS_CONFIG_NET_PLAYLIST, 0); // enable playlist processing
+        if (BASS_Init(-1, 44100, 0)) {
+
+            BASS_SetConfig(BASS_CONFIG_NET_PLAYLIST, 1); // enable playlist processing
             BASS_SetConfig(BASS_CONFIG_NET_PREBUF_WAIT, 0); // disable BASS_StreamCreateURL pre-buffering
             BASS_SetConfig(BASS_CONFIG_NET_BUFFER, 4000);
-            BASS_SetConfig(BASS_CONFIG_NET_READTIMEOUT, 4000);
+            BASS_SetConfig(BASS_CONFIG_NET_READTIMEOUT, 0);
+            BASS_SetConfig(BASS_CONFIG_NET_TIMEOUT, 5000);
             BASS_SetConfig(BASS_CONFIG_UPDATETHREADS, 1);
             BASS_SetConfig(BASS_CONFIG_ANDROID_AAUDIO, 0);
 
             if (NotificationsController.audioManagerSessionID > 0)
                 BASS_SetConfig(BASS_CONFIG_ANDROID_SESSIONID, NotificationsController.audioManagerSessionID);
 
-        } else {
-            Error("Can't initialize device");
+            BASS_PluginLoad("libbassflac.so", 0); // load BASSFLAC (if present) for FLAC support
+            BASS_PluginLoad("libbasshls.so", 0); // load BASSHLS (if present) for HLS support
+
+            return;
+        }
+
+        Error("Can't initialize device");
+    }
+
+    private boolean preparePlaying(final RadioModel radio) {
+
+        if (radio == null) {
             return false;
         }
 
         int requestBass;
+
         synchronized (MediaController.class) { // make sure only 1 thread at a time can do the following
             requestBass = ++this.requestBass; // increment the request counter for this request
         }
 
-        cleanupPlayer(true, false);
+        BASS_StreamFree(streamBass); // close old stream
+        //cleanupPlayer(false, false); // clean player
 
         int streamBass = BASS_StreamCreateURL(radio.getStream(), 0, FLAGS_STREAM_CREATE_URL, DownloadProc, requestBass); // open URL
+
+        if (BASS_ErrorGetCode() == BASS_ERROR_INIT) {
+            initializationBass();
+            return false;
+        }
 
         synchronized (MediaController.class) {
             if (requestBass != this.requestBass) { // there is a newer request, discard this stream
@@ -439,16 +465,19 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
             AndroidUtilities.runOnUIThread(() -> EventCenter.get().postEventName(EventCenter.radioUpdateTitleAndArtist));
         }
 
+        // start prebuffer monitoring
+        syncStateQueue.postRunnable(syncStateRunnable, 50);
+
         // set syncs for stream title updates
-        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_META | BASS_SYNC_MIXTIME, 0, MetaSync, this.requestBass);
+        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_META | BASS_SYNC_MIXTIME | BASS_SYNC_THREAD, 0, MetaSync, this.requestBass); // Shoutcast
+        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_OGG_CHANGE | BASS_SYNC_THREAD, 0, MetaSync, this.requestBass); // Icecast/OGG
+        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_HLS_SEGMENT | BASS_SYNC_THREAD, 0, MetaSync, this.requestBass); // HLS
         // set sync for stalling/buffering
-        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_STALL | BASS_SYNC_MIXTIME, 0, StallSync, this.requestBass);
+        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_STALL | BASS_SYNC_MIXTIME | BASS_SYNC_THREAD, 0, StallSync, this.requestBass);
         // set sync for end of stream
         BASS_ChannelSetSync(this.streamBass, BASS_SYNC_END, 0, EndSync, this.requestBass);
         // set sync for free of stream
-        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_FREE | BASS_SYNC_MIXTIME, 0, FreeSync, this.requestBass);
-
-        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_DEV_FAIL | BASS_SYNC_MIXTIME, 0, (handle, channel, data, user) -> Error("Сообщите мне если видите это сообщение"), this.requestBass);
+        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_FREE | BASS_SYNC_MIXTIME | BASS_SYNC_THREAD, 0, FreeSync, this.requestBass);
 
         return true;
     }
@@ -496,105 +525,101 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
 
         // get error code in current thread for display in UI thread
         final int errorCode = BASS_ErrorGetCode();
-        String errorCodeMessage = "";
+        final AtomicReference<String> errorCodeMessage = new AtomicReference<>();
+
         switch (errorCode) {
             case BASS_ERROR_MEM:
-                errorCodeMessage = "memory error";
+                errorCodeMessage.set("Memory error");
                 break;
             case BASS_ERROR_FILEOPEN:
-                errorCodeMessage = "can't open the file";
+                errorCodeMessage.set("Can't open the file");
+                StreamInfo.get().setRadioStationMeta("Ошибка подключения...");
                 break;
             case BASS_ERROR_HANDLE:
-                errorCodeMessage = "handle is not a valid channel.";
+                errorCodeMessage.set("Handle is not a valid channel.");
                 break;
             case BASS_ERROR_ILLTYPE:
-                errorCodeMessage = "An illegal type was specified.";
+                errorCodeMessage.set("An illegal type was specified.");
                 break;
             case BASS_ERROR_ILLPARAM:
-                errorCodeMessage = "An illegal param was specified.";
+                errorCodeMessage.set("An illegal param was specified.");
                 break;
             case BASS_ERROR_START:
-                errorCodeMessage = "The output is paused/stopped, use BASS_Start to start it.";
+                errorCodeMessage.set("The output is paused/stopped, use BASS_Start to start it.");
                 break;
             case BASS_ERROR_DECODE:
-                errorCodeMessage = "The channel is not playable; it is a \"decoding channel\".";
+                errorCodeMessage.set("The channel is not playable; it is a \"decoding channel\".");
                 break;
             case BASS_ERROR_BUFLOST:
-                errorCodeMessage = "Should not happen... check that a valid window handle was used with BASS_Init.";
+                errorCodeMessage.set("Should not happen... check that a valid window handle was used with BASS_Init.");
                 break;
             case BASS_ERROR_NOHW:
-                errorCodeMessage = "No hardware voices are available (HCHANNEL only). This only occurs if the sample was loaded/created with the BASS_SAMPLE_VAM flag and BASS_VAM_HARDWARE is set in the sample's VAM mode, and there are no hardware voices available to play it.";
+                errorCodeMessage.set("No hardware voices are available (HCHANNEL only). This only occurs if the sample was loaded/created with the BASS_SAMPLE_VAM flag and BASS_VAM_HARDWARE is set in the sample's VAM mode, and there are no hardware voices available to play it.");
                 break;
             case BASS_ERROR_TIMEOUT:
-                errorCodeMessage = "The server did not respond to the request within the timeout period, as set with the BASS_CONFIG_NET_TIMEOUT config option.";
+                errorCodeMessage.set("The server did not respond to the request within the timeout period, as set with the BASS_CONFIG_NET_TIMEOUT config option.");
                 break;
             case BASS_ERROR_INIT:
-                errorCodeMessage = "BASS_Init has not been successfully called.";
+                errorCodeMessage.set("BASS_Init has not been successfully called.");
                 break;
             case BASS_ERROR_NOTAVAIL:
-                errorCodeMessage = "The BASS_STREAM_AUTOFREE flag cannot be combined with the BASS_STREAM_DECODE flag.";
+                errorCodeMessage.set("The BASS_STREAM_AUTOFREE flag cannot be combined with the BASS_STREAM_DECODE flag.");
                 break;
             case BASS_ERROR_NONET:
-                errorCodeMessage = "No internet connection could be opened. Can be caused by a bad proxy setting.";
+                errorCodeMessage.set("No internet connection could be opened. Can be caused by a bad proxy setting.");
                 break;
             case BASS_ERROR_SSL:
-                errorCodeMessage = "SSL/HTTPS support is not available. See BASS_CONFIG_LIBSSL.";
+                errorCodeMessage.set("SSL/HTTPS support is not available. See BASS_CONFIG_LIBSSL.");
                 break;
             case BASS_ERROR_FILEFORM:
-                errorCodeMessage = "The file's format is not recognised/supported.";
+                errorCodeMessage.set("The file's format is not recognised/supported.");
                 break;
             case BASS_ERROR_UNSTREAMABLE:
-                errorCodeMessage = "The file cannot be streamed. This could be because an MP4 file's \"mdat\" atom comes before its \"moov\" atom.";
+                errorCodeMessage.set("The file cannot be streamed. This could be because an MP4 file's \"mdat\" atom comes before its \"moov\" atom.");
                 break;
             case BASS_ERROR_NOTAUDIO:
-                errorCodeMessage = "The file does not contain audio, or it also contains video and videos are disabled.";
+                errorCodeMessage.set("The file does not contain audio, or it also contains video and videos are disabled.");
                 break;
             case BASS_ERROR_CODEC:
-                errorCodeMessage = "The file uses a codec that is not available/supported. This can apply to WAV and AIFF files, and also MP3 files when using the \"MP3-free\" BASS version.";
+                errorCodeMessage.set("The file uses a codec that is not available/supported. This can apply to WAV and AIFF files, and also MP3 files when using the \"MP3-free\" BASS version.");
                 break;
             case BASS_ERROR_FORMAT:
-                errorCodeMessage = "The sample format is not supported by the device/drivers. If the stream is more than stereo or the BASS_SAMPLE_FLOAT flag is used, it could be that they are not supported.";
+                errorCodeMessage.set("The sample format is not supported by the device/drivers. If the stream is more than stereo or the BASS_SAMPLE_FLOAT flag is used, it could be that they are not supported.");
                 break;
             case BASS_ERROR_SPEAKER:
-                errorCodeMessage = "The specified SPEAKER flags are invalid. The device/drivers do not support them, they are attempting to assign a stereo stream to a mono speaker or 3D functionality is enabled.";
+                errorCodeMessage.set("The specified SPEAKER flags are invalid. The device/drivers do not support them, they are attempting to assign a stereo stream to a mono speaker or 3D functionality is enabled.");
                 break;
             case BASS_ERROR_NO3D:
-                errorCodeMessage = "Could not initialize 3D support.";
+                errorCodeMessage.set("Could not initialize 3D support.");
                 break;
             case BASS_ERROR_NOPLAY:
-                errorCodeMessage = "The channel is not playing (or handle is not a valid channel).";
+                errorCodeMessage.set("The channel is not playing (or handle is not a valid channel).");
                 break;
             case BASS_ERROR_ALREADY:
-                errorCodeMessage = "The channel is already paused.";
+                errorCodeMessage.set("The channel is already paused.");
                 break;
             case BASS_ERROR_ENDED:
-                errorCodeMessage = "The channel has ended.";
+                errorCodeMessage.set("The channel has ended.");
                 break;
             default:
-                errorCodeMessage = "Some other mystery problem!";
+                errorCodeMessage.set("Some other mystery problem!");
                 break;
         }
-        final String messageError = Utilities.format("%s\n(error code: %d)", es, errorCode);
+
+        final String messageError = Utilities.format("%s\n(error code: %d)\n(error message: %s)", es, errorCode, errorCodeMessage.get());
 
         Crashlytics.log(messageError);
         FileLog.e(messageError);
         stopRestartPlaying();
 
-        EventCenter.get().postEventName(EventCenter.itemPlayingPlayStateChanged, getPlayingRadio());
-
-        NotificationsController.audioManager.abandonAudioFocus(this);
-
-        cleanupPlayer(false, false);
-        if (isBassInit) BASS_Free();
-
         AndroidUtilities.runOnUIThread(() -> {
 
+            EventCenter.get().postEventName(EventCenter.itemPlayingPlayStateChanged, getPlayingRadio());
             EventCenter.get().postEventName(EventCenter.radioUpdateTitleAndArtist);
             EventCenter.get().postEventName(EventCenter.radioPlayingPlayStateChanged);
             EventCenter.get().postEventName(EventCenter.radioShowAlertError, messageError);
 
             if (errorCode == BASS_ERROR_FILEOPEN) {
-                StreamInfo.get().setRadioStationMeta("Ошибка подключения...");
                 EventCenter.get().postEventName(EventCenter.restartPlayingError);
             }
         });
@@ -611,6 +636,19 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
     private DOWNLOADPROC DownloadProc = (buffer, length, user) -> {
         if ((Integer) user != requestBass) return; // make sure this is still the current request
 
+        if (buffer != null && length == 0) { // got HTTP/ICY tags
+            try {
+
+                CharsetDecoder dec = StandardCharsets.ISO_8859_1.newDecoder();
+                ByteBuffer temp = ByteBuffer.allocate(buffer.limit()); // CharsetDecoder doesn't like a direct buffer?
+                temp.put(buffer);
+                temp.position(0);
+
+                FileLog.d(dec.decode(temp).toString().replace("\0", "\n"));
+
+            } catch (Exception ignored) {
+            }
+        }
 
         if (buffer == null && isPlaying()) {
 
@@ -641,14 +679,13 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
                 StreamInfo.get().setRadioStationMeta(Utilities.format("Попытка подключения... %d", countReconnected));
 
                 AndroidUtilities.runOnUIThread(() -> EventCenter.get().postEventName(EventCenter.restartPlaying));
-                mediaQueue.postRunnable(restartPlayingRunnable, BASS_GetConfig(BASS_CONFIG_NET_READTIMEOUT));
+                mediaQueue.postRunnable(restartPlayingRunnable, BASS_GetConfig(BASS_CONFIG_NET_TIMEOUT));
 
                 play(playingRadio);
                 countReconnected++;
             } else {
                 FileLog.d("channel: RestartStream - error");
                 stopRestartPlaying();
-                if (isBassInit) BASS_Free();
                 AndroidUtilities.runOnUIThread(() -> EventCenter.get().postEventName(EventCenter.restartPlayingError));
             }
         }
@@ -658,11 +695,12 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
 
         stopRestartPlaying();
         FileLog.d("channel: EndSync");
-        NotificationsController.audioManager.abandonAudioFocus(this);
+        cleanupPlayer(true, true);
 
         AndroidUtilities.runOnUIThread(() -> {
             EventCenter.get().postEventName(EventCenter.radioUpdateTitleAndArtist);
             EventCenter.get().postEventName(EventCenter.radioPlayingPlayStateChanged);
+            EventCenter.get().postEventName(EventCenter.itemPlayingPlayStateChanged, getPlayingRadio());
         });
     };
 
@@ -671,7 +709,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
         if (isRestartPlaying()) return;
         FileLog.d("channel: FreeSync");
         NotificationsController.audioManager.abandonAudioFocus(this);
-
+        BASS_StreamFree(streamBass); // close old stream
     };
 
     private SYNCPROC MetaSync = (handle, channel, data, user) -> DoMeta();
@@ -682,11 +720,13 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
 
         if (data == 0) {
             syncStateQueue.postRunnable(syncStateRunnable, 50);// start buffer monitoring
+            AndroidUtilities.runOnUIThread(() -> EventCenter.get().postEventName(EventCenter.itemPlayingPlayStateChanged, getPlayingRadio()));
         } else {
             stopRestartPlaying();
-            AndroidUtilities.runOnUIThread(() -> EventCenter.get().postEventName(EventCenter.radioPlayingPlayStateChanged));
-            // get the stream title
-            DoMeta();
+            AndroidUtilities.runOnUIThread(() -> {
+                EventCenter.get().postEventName(EventCenter.radioPlayingPlayStateChanged);
+                EventCenter.get().postEventName(EventCenter.itemPlayingPlayStateChanged, getPlayingRadio());
+            });
         }
     };
 
@@ -712,6 +752,34 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
             int ti = meta.get().indexOf("StreamTitle='");
             if (ti >= 0) {
                 StreamInfo.get().setRadioStationMeta(meta.get().substring(ti + 13, meta.get().indexOf("';", ti + 13)));
+            }
+        } else {
+            String[] ogg = (String[]) BASS_ChannelGetTags(streamBass, BASS_TAG_OGG);
+            if (ogg != null) { // got Icecast/OGG tags
+                AtomicReference<String> artist = new AtomicReference<>();
+                AtomicReference<String> title = new AtomicReference<>();
+
+                for (String s : ogg) {
+                    if (s.regionMatches(true, 0, "artist=", 0, 7))
+                        artist.set(s.substring(7));
+                    else if (s.regionMatches(true, 0, "title=", 0, 6))
+                        title.set(s.substring(6));
+                }
+
+                if (title.get() != null) {
+                    if (artist.get() != null)
+                        StreamInfo.get().setRadioStationMeta(artist + " - " + title);
+                    else
+                        StreamInfo.get().setRadioStationMeta(title.get());
+                }
+
+            } else {
+                meta.set((String) BASS_ChannelGetTags(streamBass, BASS_TAG_HLS_EXTINF));
+                if (meta.get() != null && meta.get().length() > 0) { // got HLS segment info
+                    int i = meta.get().indexOf(',');
+                    if (i > 0)
+                        StreamInfo.get().setRadioStationMeta(meta.get().substring(i + 1));
+                }
             }
         }
 

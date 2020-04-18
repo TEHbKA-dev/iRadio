@@ -2,9 +2,12 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="100dp"
+    android:layout_width="102dp"
     android:layout_height="120dp"
     android:layout_margin="5dp"
+    android:orientation="vertical"
+    android:clickable="true"
+    android:focusable="true"
     android:background="@drawable/ripple_effect_15dp_radius"
     tools:background="#444444">
 
@@ -12,11 +15,13 @@
         android:id="@+id/coverTrackCard"
         android:layout_width="88dp"
         android:layout_height="88dp"
-        android:layout_margin="6dp"
+        android:layout_marginTop="7dp"
+        android:layout_marginBottom="7dp"
         android:clickable="false"
         android:focusable="false"
         app:cardCornerRadius="16dp"
         app:cardElevation="1dp"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
@@ -31,11 +36,8 @@
 
     <TextView
         android:id="@+id/radioStation"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="6dp"
-        android:layout_marginEnd="6dp"
-        android:layout_marginBottom="6dp"
         android:ellipsize="marquee"
         android:focusable="true"
         android:focusableInTouchMode="true"
@@ -47,7 +49,9 @@
         android:textColor="@color/colorWhite"
         android:textSize="12sp"
         app:layout_constraintBottom_toBottomOf="parent"
-        tools:layout_editor_absoluteX="6dp" />
+        app:layout_constraintEnd_toEndOf="@+id/coverTrackCard"
+        app:layout_constraintStart_toStartOf="@+id/coverTrackCard"
+        app:layout_constraintTop_toBottomOf="@+id/coverTrackCard" />
 
     <ImageView
         android:id="@+id/statePlayPause"
@@ -56,7 +60,6 @@
         android:alpha=".7"
         android:contentDescription="@string/radio_state"
         android:elevation="1dp"
-        android:src="@drawable/loading_animation3"
         app:layout_constraintBottom_toBottomOf="@id/coverTrackCard"
         app:layout_constraintEnd_toEndOf="@id/coverTrackCard"
         app:layout_constraintStart_toStartOf="@id/coverTrackCard"

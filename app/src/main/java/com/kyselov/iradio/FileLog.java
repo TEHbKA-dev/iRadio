@@ -2,7 +2,6 @@ package com.kyselov.iradio;
 
 import android.util.Log;
 
-
 import com.kyselov.iradio.time.FastDateFormat;
 
 import java.io.File;
@@ -17,9 +16,9 @@ public class FileLog {
     private DispatchQueue logQueue = null;
     private File currentFile = null;
     private File networkFile = null;
-    private boolean initied;
+    private boolean initial;
 
-    private final static String tag = "iradio";
+    private final static String tag = "iRadioLog";
 
     private static volatile FileLog Instance = null;
 
@@ -44,7 +43,7 @@ public class FileLog {
     }
 
     public void init() {
-        if (initied) {
+        if (initial) {
             return;
         }
         dateFormat = FastDateFormat.getInstance("dd_MM_yyyy_HH_mm_ss", Locale.US);
@@ -69,10 +68,10 @@ public class FileLog {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        initied = true;
+        initial = true;
     }
 
-    public static void ensureInitied() {
+    public static void ensureInitial() {
         getInstance().init();
     }
 
@@ -99,12 +98,12 @@ public class FileLog {
         if (!BuildVars.LOGS_ENABLED) {
             return;
         }
-        ensureInitied();
+        ensureInitial();
         Log.e(tag, message, exception);
         if (getInstance().streamWriter != null) {
             getInstance().logQueue.postRunnable(() -> {
                 try {
-                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iradio: " + message + "\n");
+                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iRadioLog: " + message + "\n");
                     getInstance().streamWriter.write(exception.toString());
                     getInstance().streamWriter.flush();
                 } catch (Exception e) {
@@ -118,12 +117,12 @@ public class FileLog {
         if (!BuildVars.LOGS_ENABLED) {
             return;
         }
-        ensureInitied();
+        ensureInitial();
         Log.e(tag, message);
         if (getInstance().streamWriter != null) {
             getInstance().logQueue.postRunnable(() -> {
                 try {
-                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iradio: " + message + "\n");
+                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iRadioLog: " + message + "\n");
                     getInstance().streamWriter.flush();
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -136,15 +135,15 @@ public class FileLog {
         if (!BuildVars.LOGS_ENABLED) {
             return;
         }
-        ensureInitied();
+        ensureInitial();
         e.printStackTrace();
         if (getInstance().streamWriter != null) {
             getInstance().logQueue.postRunnable(() -> {
                 try {
-                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iradio: " + e + "\n");
+                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iRadioLog: " + e + "\n");
                     StackTraceElement[] stack = e.getStackTrace();
                     for (StackTraceElement stackTraceElement : stack) {
-                        getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iradio: " + stackTraceElement + "\n");
+                        getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " E/iRadioLog: " + stackTraceElement + "\n");
                     }
                     getInstance().streamWriter.flush();
                 } catch (Exception e1) {
@@ -160,12 +159,12 @@ public class FileLog {
         if (!BuildVars.LOGS_ENABLED) {
             return;
         }
-        ensureInitied();
+        ensureInitial();
         Log.d(tag, message);
         if (getInstance().streamWriter != null) {
             getInstance().logQueue.postRunnable(() -> {
                 try {
-                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " D/iradio: " + message + "\n");
+                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " D/iRadioLog: " + message + "\n");
                     getInstance().streamWriter.flush();
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -178,12 +177,12 @@ public class FileLog {
         if (!BuildVars.LOGS_ENABLED) {
             return;
         }
-        ensureInitied();
+        ensureInitial();
         Log.w(tag, message);
         if (getInstance().streamWriter != null) {
             getInstance().logQueue.postRunnable(() -> {
                 try {
-                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " W/iradio: " + message + "\n");
+                    getInstance().streamWriter.write(getInstance().dateFormat.format(System.currentTimeMillis()) + " W/iRadioLog: " + message + "\n");
                     getInstance().streamWriter.flush();
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -193,7 +192,7 @@ public class FileLog {
     }
 
     public static void cleanupLogs() {
-        ensureInitied();
+        ensureInitial();
         File sdCard = ApplicationLoader.applicationContext.getExternalFilesDir(null);
         if (sdCard == null) {
             return;

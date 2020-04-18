@@ -22,7 +22,6 @@ import com.kyselov.iradio.AndroidUtilities;
 import com.kyselov.iradio.FileLog;
 import com.kyselov.iradio.MediaController;
 import com.kyselov.iradio.R;
-import com.kyselov.iradio.StreamInfo;
 import com.kyselov.iradio.models.RadioModel;
 import com.squareup.picasso.Picasso;
 
@@ -50,6 +49,7 @@ public class RadioUiAdapter extends RecyclerView.Adapter<RadioUiAdapter.RadioHol
 
         mContext = context;
         mDatabaseReference = FirebaseDatabase.getInstance().getReference().child("radio");
+
     }
 
     public void setOnItemClickListener(final OnItemClickListener onItemClickListener) {
@@ -192,24 +192,29 @@ public class RadioUiAdapter extends RecyclerView.Adapter<RadioUiAdapter.RadioHol
             if (mOnItemClickListener != null) {
                 itemView.setOnClickListener(v -> {
 
-                    itemView.setSelected(true);
-                    statePlayPause.setImageResource(R.drawable.loading_animation3);
                     mOnItemClickListener.onItemClick(itemView, radio, getAdapterPosition());
-                    //if (currentlyPlayingPosition != getAdapterPosition())
-                    //    notifyItemChanged(currentlyPlayingPosition);
-                    currentlyPlayingPosition = getAdapterPosition();
+                    AndroidUtilities.runOnUIThread(() -> {
+                        notifyItemChanged(currentlyPlayingPosition);
+                        notifyItemChanged(getAdapterPosition());
+                        currentlyPlayingPosition = getAdapterPosition();
+                    }, 150);
                 });
             }
         }
 
         void updateStatePlayPause() {
             final RadioModel radioModel = mRadios.get(getAdapterPosition());
+            final RadioModel currentRadioModel = MediaController.get().getPlayingRadio();
+            if (currentRadioModel == null) return;
 
-            if (radioModel.getPrefix().equals(StreamInfo.get().getRadioStationPrefix())) {
-                if (!MediaController.get().isPaused())
-                    statePlayPause.setImageResource(R.drawable.ic_pause_circle_filled_black_24dp);
-                else
+            if (radioModel.getPrefix().equals(currentRadioModel.getPrefix())) {
+                currentlyPlayingPosition = getAdapterPosition();
+                if (MediaController.get().isDownloading())
+                    statePlayPause.setImageResource(R.drawable.loading_animation3);
+                else if (MediaController.get().isPaused())
                     statePlayPause.setImageResource(R.drawable.ic_play_circle_filled_black_24dp);
+                else
+                    statePlayPause.setImageResource(R.drawable.ic_pause_circle_filled_black_24dp);
                 itemView.setSelected(true);
             } else {
                 statePlayPause.setImageDrawable(null);

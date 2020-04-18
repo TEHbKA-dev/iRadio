@@ -70,6 +70,7 @@ public class MainActivity extends AppCompatActivity implements EventCenter.Event
         radioUiAdapter = new RadioUiAdapter(this);
 
         mRecyclerView.setAdapter(radioUiAdapter);
+
         radioUiAdapter.setOnItemClickListener((view, model, position) -> {
 
             final RadioModel playingRadio = MediaController.get().getPlayingRadio();
@@ -183,9 +184,9 @@ public class MainActivity extends AppCompatActivity implements EventCenter.Event
             if (radioModel != null) {
                 final int indexModelRadio = radioUiAdapter.getRadios().indexOf(radioModel);
                 if (indexModelRadio > -1) {
-                    ImageView f = mRecyclerView.findViewWithTag(radioModel.getPrefix()).findViewById(R.id.statePlayPause);
-                    f.setImageResource(R.drawable.loading_animation3);
-                   // radioUiAdapter.notifyItemChanged(indexModelRadio);
+                    //ImageView f = mRecyclerView.findViewWithTag(radioModel.getPrefix()).findViewById(R.id.statePlayPause);
+                    //f.setImageResource(R.drawable.loading_animation3);
+                    radioUiAdapter.notifyItemChanged(indexModelRadio);
                 }
             }
         }
