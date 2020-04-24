@@ -89,8 +89,6 @@ import static com.un4seen.bass.BASS.BASS_TAG_ICY;
 import static com.un4seen.bass.BASS.BASS_TAG_META;
 import static com.un4seen.bass.BASS.BASS_TAG_OGG;
 import static com.un4seen.bass.BASS.SYNCPROC;
-import static com.un4seen.bass.BASSHLS.BASS_SYNC_HLS_SEGMENT;
-import static com.un4seen.bass.BASSHLS.BASS_TAG_HLS_EXTINF;
 
 public class MediaController implements AudioManager.OnAudioFocusChangeListener {
 
@@ -415,8 +413,9 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
             if (NotificationsController.audioManagerSessionID > 0)
                 BASS_SetConfig(BASS_CONFIG_ANDROID_SESSIONID, NotificationsController.audioManagerSessionID);
 
-            BASS_PluginLoad("libbassflac.so", 0); // load BASSFLAC (if present) for FLAC support
-            BASS_PluginLoad("libbasshls.so", 0); // load BASSHLS (if present) for HLS support
+            BASS_PluginLoad("libbass_aac.so", 0);
+            BASS_PluginLoad("libbass_fx.so", 0);
+            BASS_PluginLoad("libbass_ssl.so", 0);
 
             return;
         }
@@ -471,7 +470,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
         // set syncs for stream title updates
         BASS_ChannelSetSync(this.streamBass, BASS_SYNC_META | BASS_SYNC_MIXTIME | BASS_SYNC_THREAD, 0, MetaSync, this.requestBass); // Shoutcast
         BASS_ChannelSetSync(this.streamBass, BASS_SYNC_OGG_CHANGE | BASS_SYNC_THREAD, 0, MetaSync, this.requestBass); // Icecast/OGG
-        BASS_ChannelSetSync(this.streamBass, BASS_SYNC_HLS_SEGMENT | BASS_SYNC_THREAD, 0, MetaSync, this.requestBass); // HLS
         // set sync for stalling/buffering
         BASS_ChannelSetSync(this.streamBass, BASS_SYNC_STALL | BASS_SYNC_MIXTIME | BASS_SYNC_THREAD, 0, StallSync, this.requestBass);
         // set sync for end of stream
@@ -773,13 +771,6 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener 
                         StreamInfo.get().setRadioStationMeta(title.get());
                 }
 
-            } else {
-                meta.set((String) BASS_ChannelGetTags(streamBass, BASS_TAG_HLS_EXTINF));
-                if (meta.get() != null && meta.get().length() > 0) { // got HLS segment info
-                    int i = meta.get().indexOf(',');
-                    if (i > 0)
-                        StreamInfo.get().setRadioStationMeta(meta.get().substring(i + 1));
-                }
             }
         }
 
